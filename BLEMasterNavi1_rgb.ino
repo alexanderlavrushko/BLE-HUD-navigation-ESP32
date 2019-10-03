@@ -42,7 +42,7 @@ int nBackgroundDevicesCount = 0;
 BLEAdvertisedDevice* ppBackgroundDevices[BACKGROUND_DEVICES_SIZE] = {};
 
 BLEAddress *pServerAddress = nullptr;
-BLEAdvertisedDevice* myDevice;
+BLEAdvertisedDevice* myDevice = nullptr;
 bool doConnect = false;
 bool connected = false;
 

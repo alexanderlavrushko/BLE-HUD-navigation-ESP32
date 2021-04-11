@@ -2,7 +2,7 @@
 
 https://www.facebook.com/story.php?story_fbid=10156820199717852&id=92684932851
 
-![Prototype](IMG_BLE_HUD.png)
+![Prototype](/images/IMG_BLE_HUD.png)
 
 ### Display connection
 Display: Waveshare WS14747 128x128 OLED RGB ([link](https://www.waveshare.com/1.5inch-rgb-oled-module.htm))
@@ -16,4 +16,4 @@ G5 | CS
 G17 | DC
 G16 | RST
 
-![Display connection](IMG_Display_connection.jpg)
+![Display connection](/images/IMG_Display_connection.jpg)

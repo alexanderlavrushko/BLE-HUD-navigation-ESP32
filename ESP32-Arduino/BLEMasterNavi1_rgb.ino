@@ -232,7 +232,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
         }
         else
         {
-            Serial.println("manufacturer data WRONG");
+            Serial.println("manufacturerData: not Apple device with background BLE services");
         }
     }
   } // onResult

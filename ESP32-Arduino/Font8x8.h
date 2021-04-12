@@ -27,7 +27,12 @@ const byte* GetCharProgmem(const byte* ptr)
 
 const byte* FormatChar(char c)
 {
-    const byte* pGlyph = (const byte*)pgm_read_dword(&(ascii[int(c)]));
+    int index = static_cast<int>(static_cast<unsigned char>(c));
+    if (index > 127)
+    {
+        index = static_cast<int>('?');
+    }
+    const byte* pGlyph = (const byte*)pgm_read_dword(&(ascii[index]));
     return GetCharProgmem(pGlyph);
 }
 

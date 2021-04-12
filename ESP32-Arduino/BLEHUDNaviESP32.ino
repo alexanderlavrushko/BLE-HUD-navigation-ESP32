@@ -1,4 +1,7 @@
-#include "BLEDevice.h"
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
 #include <SPI.h>
 #include "OLED.h"
 #include "ImagesOther.h"
@@ -6,9 +9,15 @@
 #include "ImagesLanes.h"
 #include "Font8x8.h"
 #include "GlyphShifter.h"
-#include "SygicConstants.h"
+#include "DataConstants.h"
 
+#define SERVICE_UUID        "DD3F0AD1-6239-4E1F-81F1-91F6C9F01D86"
+#define CHAR_INDICATE_UUID  "DD3F0AD2-6239-4E1F-81F1-91F6C9F01D86"
+#define CHAR_WRITE_UUID     "DD3F0AD3-6239-4E1F-81F1-91F6C9F01D86"
 
+// ---------------------
+// Variables for display
+// ---------------------
 const byte MIN_CHAR_WIDTH = 3;
 const byte SPACE_BETWEEN_CHARS = 1;
 enum DrawingMode
@@ -20,230 +29,58 @@ enum DrawingMode
     DrawingModeCount
 };
 
-
-#define PIN_BUTTON 19
-
-
 const int spiClk = 32000000; // 32 MHz (40 MHz causes problems, about 1% of bytes are not received by display)
 
 uint16_t g_canvas[128 * 128] = {};
 DrawingMode g_drawingMode = DrawingModeNormal;
-bool g_isButtonPressed = false;
 
-// The remote service we wish to connect to.
-BLEUUID serviceUUID("91bad492-b950-4226-aa2b-4ede9fa42f59");
-// The characteristic of the remote service we are interested in.
-BLEUUID    charPingUUID("0d563a58-196a-48ce-ace2-dfec78acc814");
-BLEUUID    charUUID("A27590DD-92A1-4362-88D4-490FE00B01F5");
-BLEUUID    charLanesUUID("852905F0-A74A-4CD7-88FE-9FC581049684");
+// -----------------
+// Variables for BLE
+// -----------------
+BLEServer* g_pServer = NULL;
+BLECharacteristic* g_pCharIndicate = NULL;
+bool g_deviceConnected = false;
+uint32_t g_lastActivityTime = 0;
+bool g_isNaviDataUpdated = false;
+std::string g_naviData;
 
-const int BACKGROUND_DEVICES_SIZE = 16;
-int nBackgroundDevicesCount = 0;
-BLEAdvertisedDevice* ppBackgroundDevices[BACKGROUND_DEVICES_SIZE] = {};
+class MyServerCallbacks: public BLEServerCallbacks
+{
+    void onConnect(BLEServer* pServer) override
+    {
+        g_deviceConnected = true;
+        g_lastActivityTime = millis();
+    }
 
-BLEAddress *pServerAddress = nullptr;
-BLEAdvertisedDevice* myDevice = nullptr;
-bool doConnect = false;
-bool connected = false;
-
-BLERemoteCharacteristic* pRemoteCharacteristicPing = nullptr;
-BLERemoteCharacteristic* pRemoteCharacteristicLanes = nullptr;
-BLERemoteCharacteristic* pRemoteCharacteristic = nullptr;
-
-std::string g_laneData;
-
-
-static void notifyCallback(
-  BLERemoteCharacteristic* pBLERemoteCharacteristic,
-  uint8_t* pData,
-  size_t length,
-  bool isNotify) {
-    Serial.print("Notify callback for characteristic ");
-    Serial.print(pBLERemoteCharacteristic->getUUID().toString().c_str());
-    Serial.print(" of data length ");
-    Serial.println(length);
-}
-
-class MyClientCallback : public BLEClientCallbacks {
-  void onConnect(BLEClient* pclient) {
-  }
-
-  void onDisconnect(BLEClient* pclient) {
-      connected = false;
-      Serial.println("MyClientCallback onDisconnect");
-  }
+    void onDisconnect(BLEServer* pServer) override
+    {
+        g_deviceConnected = false;
+        BLEDevice::startAdvertising();
+    }
 };
 
-bool connectToServer(BLEAdvertisedDevice* deviceToConnect) {
-    Serial.print("Forming a connection to ");
-    Serial.println(deviceToConnect->getAddress().toString().c_str());
-
-    BLEClient*  pClient  = BLEDevice::createClient();
-    Serial.println(" - Created client");
-
-    pClient->setClientCallbacks(new MyClientCallback());
-
-    // Connect to the remove BLE Server.
-    pClient->connect(deviceToConnect);
-    Serial.println(" - Connected to server");
-
-    // Obtain a reference to the service we are after in the remote BLE server.
-    BLERemoteService* pRemoteService = pClient->getService(serviceUUID);
-    if (pRemoteService == nullptr) {
-      Serial.print("Failed to find our service UUID: ");
-      Serial.println(serviceUUID.toString().c_str());
-      return false;
-    }
-    Serial.println(" - Found our service");
-
-
-    // Obtain a reference to the characteristic in the service of the remote BLE server.
-    pRemoteCharacteristicPing = pRemoteService->getCharacteristic(charPingUUID);
-    if (pRemoteCharacteristicPing == nullptr) {
-      Serial.print("Failed to find our characteristic UUID: ");
-      Serial.println(charPingUUID.toString().c_str());
-      return false;
-    }
-    Serial.println(" - Found our characteristic");
-
-    // Read the value of the characteristic.
-    std::string value = pRemoteCharacteristicPing->readValue();
-    Serial.print("The characteristic value was: ");
-    Serial.println(value.c_str());
-
-    try
+class MyCharWriteCallbacks: public BLECharacteristicCallbacks
+{
+    void onWrite(BLECharacteristic *pCharacteristic)
     {
-        pRemoteCharacteristicLanes = pRemoteService->getCharacteristic(charLanesUUID);
-        if (pRemoteCharacteristicLanes == nullptr)
+        g_lastActivityTime = millis();
+        std::string value = pCharacteristic->getValue();
+
+        if (value.length() > 0)
         {
-            Serial.println(" - characteristic lanes not found (nullptr)");
-        }
-        else
-        {
-            Serial.println(" - Found our characteristic Lanes");
+            g_naviData = value;
+            g_isNaviDataUpdated = true;
+            Serial.print("New value. ");
         }
     }
-    catch (...)
-    {
-        Serial.println(" - characteristic lanes not found (exception)");
-    }
-    
-    {
-        // Obtain a reference to the characteristic in the service of the remote BLE server.
-        pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
-        if (pRemoteCharacteristic == nullptr) {
-          Serial.print("Failed to find our characteristic UUID: ");
-          Serial.println(charUUID.toString().c_str());
-          return false;
-        }
-        Serial.println(" - Found our characteristic");
-    
-//        // Read the value of the characteristic.
-//        std::string value = pRemoteCharacteristic->readValue();
-//        Serial.print("The characteristic value was: ");
-//        Serial.println(value.c_str());
-//    
-//        pRemoteCharacteristic->registerForNotify(notifyCallback);
-    }
-}
-
-/**
- * Scan for BLE servers and find the first one that advertises the service we are looking for.
- */
-class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
- /**
-   * Called for each advertising BLE server.
-   */
-  void onResult(BLEAdvertisedDevice advertisedDevice) {
-    Serial.print("BLE Advertised Device found: ");
-    Serial.println(advertisedDevice.toString().c_str());
-
-    Serial.print("AD data: ");
-    const uint8_t* payload = advertisedDevice.getPayload();
-    for (int i = 0; i < 62; ++i)
-    {
-        if (payload[i] < 0x10)
-        {
-            Serial.print(" 0");
-        }
-        else
-        {
-            Serial.print(" ");
-        }
-
-        Serial.print(payload[i], HEX);
-    }
-    Serial.println("");
-
-    // We have found a device, let us now see if it contains the service we are looking for.
-    String addressStr(advertisedDevice.getAddress().toString().c_str());
-    if (advertisedDevice.haveServiceUUID())
-    {
-        if (advertisedDevice.getServiceUUID().equals(serviceUUID)) {
-          // 
-          Serial.print("Found our device!  address: "); 
-          advertisedDevice.getScan()->stop();
-
-          myDevice = new BLEAdvertisedDevice(advertisedDevice);
-          pServerAddress = new BLEAddress(advertisedDevice.getAddress());
-          doConnect = true;
-        }
-        else
-        {
-            Serial.println("ServiceUUID() doesnt match"); 
-        }
-    }
-    else
-    {
-//        Serial.println("haveServiceUUID() == false");
-//        
-//        Serial.print("Mdata: ");
-//        Serial.print(advertisedDevice.getManufacturerData().length());
-//        Serial.print(" ");
-//        const uint8_t* mdata = (const uint8_t*)advertisedDevice.getManufacturerData().data();
-//        for (int i = 0; i < advertisedDevice.getManufacturerData().length(); ++i)
-//        {
-//            if (mdata[i] < 0x10)
-//                Serial.print(" 0");
-//            else
-//                Serial.print(" ");
-//    
-//            Serial.print(mdata[i], HEX);
-//        }
-//        Serial.println("");
-
-        std::string manufacturerData = advertisedDevice.getManufacturerData();
-        if (manufacturerData.length() == 19) //hack: Apple device with BLE services in background
-        {
-            //manufacturer ID: Apple = 0x004C
-            const uint8_t* mdata = (const uint8_t*)manufacturerData.data();
-            if ((mdata[0] == 0x4C && mdata[1] == 0x00) ||
-                (mdata[0] == 0x00 && mdata[1] == 0x4C))
-            {
-                Serial.println("mdata OK");
-
-                if (nBackgroundDevicesCount < BACKGROUND_DEVICES_SIZE)
-                {
-                    ppBackgroundDevices[nBackgroundDevicesCount] = new BLEAdvertisedDevice(advertisedDevice);
-                    ++nBackgroundDevicesCount;
-                }
-                doConnect = true;
-            }
-        }
-        else
-        {
-            Serial.println("manufacturerData: not Apple device with background BLE services");
-        }
-    }
-  } // onResult
-}; // MyAdvertisedDeviceCallbacks
-
+};
 
 void setup()
 {
-//    pinMode(PIN_BUTTON, INPUT_PULLUP);
+    Serial.begin(115200);
+    Serial.println("BLENaviPeripheral2 setup() started");
 
-//init SPI
+    //init SPI
     pinMode(OLED_PIN_DC, OUTPUT);
     pinMode(OLED_PIN_RST, OUTPUT);
 
@@ -262,186 +99,123 @@ void setup()
 
     delay(200);
 
-    FillColor(0x0, 0, 0, 128, 128);
+    memset(g_canvas, 0, sizeof(g_canvas));
+    Draw4bitImageProgmem(0, 32, 128, 64, IMG_logoTbt128x64);
+    Draw4bitImageProgmem(0, 0, 32, 32, IMG_logoBluetooth32x32);
+    RedrawFromCanvas();
+
     OLED_WriteReg(0xAF); //Turn on the OLED display
 
-    SetDrawArea(0, 44, 128, 48);
-    SendProgmemConverting4to16bit(gImage_Sygic128x48, 128 * 48 / 2);
+    Serial.println("Display init done");
 
-//init BLE
-    Serial.begin(115200);
-    Serial.println("Starting Arduino BLE Client application...");
-    BLEDevice::init("");
-    
-    // Retrieve a Scanner and set the callback we want to use to be informed when we
-    // have detected a new device.  Specify that we want active scanning and start the
-    // scan to run for 30 seconds.
-    BLEScan* pBLEScan = BLEDevice::getScan();
-    pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
-    pBLEScan->setActiveScan(true);
-    pBLEScan->start(3);
+    // init BLE
+    Serial.println("BLE init started");
 
-    pinMode(PIN_BUTTON, INPUT_PULLUP);
+    BLEDevice::init("ESP32 HUD");
+    g_pServer = BLEDevice::createServer();
+    g_pServer->setCallbacks(new MyServerCallbacks());
+    BLEService *pService = g_pServer->createService(SERVICE_UUID);
+
+    // characteristic for indicate
+    {
+        uint32_t charProperties = BLECharacteristic::PROPERTY_INDICATE;
+        g_pCharIndicate = pService->createCharacteristic(CHAR_INDICATE_UUID, charProperties);
+        g_pCharIndicate->addDescriptor(new BLE2902());
+        g_pCharIndicate->setValue("");
+    }
+
+    // characteristic for write
+    {
+        uint32_t charProperties = BLECharacteristic::PROPERTY_WRITE;
+        BLECharacteristic *pCharWrite = pService->createCharacteristic(CHAR_WRITE_UUID, charProperties);
+        pCharWrite->setCallbacks(new MyCharWriteCallbacks());
+    }
+
+    pService->start();
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(true);
+    pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+    pAdvertising->setMinPreferred(0x12);
+    BLEDevice::startAdvertising();
+    Serial.println("BLE init done");
 
     Serial.println("setup() finished");
-} // End of setup.
+}
 
-
-// This is the Arduino main loop function.
 void loop()
 {
-    Serial.println("loop() start");
-    bool wasPressed = g_isButtonPressed;
-    g_isButtonPressed = (digitalRead(PIN_BUTTON) == LOW);
-    if (g_isButtonPressed && !wasPressed)
+    if (g_deviceConnected)
     {
-        g_drawingMode = (DrawingMode)((int)g_drawingMode + 1);
-        if (g_drawingMode == DrawingModeCount)
-            g_drawingMode = DrawingModeNormal;
-//        OLED_WriteReg(0xa0);
-//        OLED_WriteReg(g_isMirror ? 0x50 : 0x53);
-    }
-
-    // If the flag "doConnect" is true then we have scanned for and found the desired
-    // BLE Server with which we wish to connect.  Now we connect to it.  Once we are 
-    // connected we set the connected flag to be true.
-    if (doConnect)
-    {
-        if (myDevice)
+        if (g_isNaviDataUpdated)
         {
-            if (connectToServer(myDevice))
-            {
-                Serial.println("We are now connected to the BLE Server.");
-                connected = true;
+            g_isNaviDataUpdated = false;
     
-                FillColor(0x00, 0, 0, 128, 128);
-            }
-            else
+            std::string currentData = g_naviData;
+            if (currentData.size() > 0)
             {
-                Serial.println("We have failed to connect to the server; there is nothin more we will do.");
-            }
-        }
-        else
-        {
-            for (int i = 0; i < nBackgroundDevicesCount; ++i)
-            {
-                try
+                memset(g_canvas, 0, sizeof(g_canvas));
+                if (currentData[0] == 1)
                 {
-                    if (connectToServer(ppBackgroundDevices[i]))
-                    {
-                        Serial.println("We are now connected to the BLE Server (from background list).");
-                        connected = true;
-            
-                        FillColor(0x00, 0, 0, 128, 128);
-                        myDevice = ppBackgroundDevices[i];
-                    }
-                    else
-                    {
-                        Serial.println("Error: cannot connect to BLE server in background");
-                    }
-                }
-                catch (...)
-                {
-                    Serial.println("Error: exception during connecting to BLE server in background");
-                }
-            }
-        }
-        doConnect = false;
-    }
+                    Serial.print("Reading basic data: length = ");
+                    Serial.println(currentData.length());
+                    
+                    const int speedOffset = 1;
+                    const int instructionOffset = 2;
+                    const int textOffset = 3;
 
-    // If we are connected to a peer BLE Server, update the characteristic each time we are reached
-    // with the current time since boot.
-    if (connected)
-    {
-        if (pRemoteCharacteristicPing)
-        {
-            try
-            {
-                std::string pingData = pRemoteCharacteristicPing->readValue();
-                String newValue(pingData.c_str());
-                Serial.println("Read characteristic PING value: \"" + newValue + "\"");
-                
-                if (pingData.size() > 0)
-                {
-                    memset(g_canvas, 0, sizeof(g_canvas));
-
-                    if (pingData[0] == '1')
+                    if (currentData.length() > textOffset)
                     {
-                        DrawMessage("App\nnot\nready", 0, 0, 4, true, 0xFFFF);
-                        RedrawFromCanvas();
-                    }
-                    else if (pingData[0] == '2')
-                    {
-                        DrawMessage("No\nroute", 0, 32, 4, true, 0xFFFF);
-                        
-                        const int flagsOffset = 1;
-                        const int speedOffset = 2;
-                        if (pingData.length() > speedOffset)
-                            DrawSpeed(pingData.c_str()[speedOffset]);
-                        
-                        RedrawFromCanvas();
-                    }
-                    else if (pingData[0] == '3')
-                    {
-                        String newValue = "connect";
-                        Serial.println("writing \"" + newValue + "\"");
-                        pRemoteCharacteristic->writeValue(newValue.c_str(), newValue.length());
-                    }
-                    else if (pingData[0] == 'i')
-                    {
-                        const int flagsOffset = 1;
-                        const int speedOffset = 2;
-                        const int instructionOffset = 3;
-                        const int distanceOffset = 4;
-
-                        if (pingData.length() > distanceOffset)
-                            DrawMessage(pingData.c_str() + distanceOffset, 0, 64, 4, true, Color4To16bit(0x0F)/*0xFFFF*/);
-                        
-                        if (pingData.length() > instructionOffset)
-                            DrawDirection(pingData.c_str()[instructionOffset]);
-
-                        if (pingData.length() > speedOffset)
-                            DrawSpeed(pingData.c_str()[speedOffset]);
-
-                        if (pingData.length() > flagsOffset)
+                        int scale = 4;
+                        const char* text = currentData.c_str() + textOffset;
+                        const int textLen = strlen(text);
+                        if (textLen > 8)
                         {
-                            const uint8_t ReadLanesRequired = 1 << 4;
-                            uint8_t flags = pingData.c_str()[flagsOffset];
-                            if (flags & ReadLanesRequired)
-                            {
-                                if (pRemoteCharacteristicLanes)
-                                {
-                                    g_laneData = pRemoteCharacteristicLanes->readValue();
-                                }
-                                else
-                                {
-                                    Serial.println("Characteristic Lanes not init");
-                                }
-                            }
-                            if (g_laneData.length() > 0)
-                            {
-                                DrawLanes(g_laneData, 96);
-                            }
+                            scale = 2;
                         }
-                        RedrawFromCanvas();
+                        else if (textLen > 6)
+                        {
+                            scale = 3;
+                        }
+                        DrawMessage(currentData.c_str() + textOffset, 0, 64, scale, true, Color4To16bit(0x0F)/*0xFFFF*/);
                     }
+                    
+                    if (currentData.length() > instructionOffset)
+                        DrawDirection(currentData.c_str()[instructionOffset]);
+
+                    if (currentData.length() > speedOffset)
+                        DrawSpeed(currentData.c_str()[speedOffset]);
+
+                    RedrawFromCanvas();
                 }
-            }
-            catch (...)
-            {
-                Serial.println("exception during ping");
+                else
+                {
+                    Serial.println("invalid first byte");
+                }
             }
         }
         else
         {
-            Serial.println("pRemoteCharacteristic == NULL");
+            uint32_t time = millis();
+            if (time - g_lastActivityTime > 4000)
+            {
+                g_lastActivityTime = time;
+                g_pCharIndicate->indicate();
+            }
         }
     }
+    else if (millis() > 3000)
+    {
+        const int yOffset = 128 - 16 - 1;
+        const int rowSize = 128 * 2;
+        memset((uint8_t*)g_canvas + yOffset * rowSize, 0, 16 * rowSize);
+        DrawMessage("Disconnected", 0, yOffset, 2, true, 0xFFFF);
+        RedrawFromCanvas();
+    }
+    delay(10);
+}
 
-    delay(1000); // Delay a second between loops.
-} // End of loop
-
-void DrawMessage(const char *msg, int xStart, int yStart, int scale, bool overwrite, uint16_t color)
+void DrawMessage(const char* msg, int xStart, int yStart, int scale, bool overwrite, uint16_t color)
 {
     const int lineHeight = 8 * scale + 4;
 
@@ -479,17 +253,13 @@ void DrawMessage(const char *msg, int xStart, int yStart, int scale, bool overwr
     }
 }
 
-//void DrawRemoteDirection(uint8_t direction)
-//{
-//    SetDrawArea(0, 0, 64, 64);
-//    const uint8_t* imageProgmem = ImageFromDirection(direction);
-//    SendProgmemConverting4to16bit(imageProgmem, 64 * 64 / 2);
-//}
-
 void DrawDirection(uint8_t direction)
 {
     const uint8_t* imageProgmem = ImageFromDirection(direction);
-    Draw4bitImageProgmem(0, 0, 64, 64, imageProgmem);
+    if (imageProgmem)
+    {
+        Draw4bitImageProgmem(0, 0, 64, 64, imageProgmem);
+    }
 }
 
 void DrawSpeed(uint8_t speed)
@@ -519,134 +289,51 @@ void DrawSpeed(uint8_t speed)
     DrawMessage(str, 64 + x, y, scale, false, 0x0000);
 }
 
-void DrawLanes(const std::string& laneData, int yOffset)
-{
-    typedef uint16_t LaneInfo;
-    const int MAX_LANES = 6;
-    const int IMG_WIDTH = 20;
-    const int IMG_HEIGHT = 32;
-    const int xDeltaUTurn = 3;
-    const size_t lanesCount = laneData.length() / sizeof(LaneInfo);
-    const LaneInfo* pData = reinterpret_cast<const LaneInfo*> (laneData.c_str());
-
-    int xOffset = xDeltaUTurn;
-
-    enum LaneEnum
-    {
-    FlagSymbolUTurnLeft                 = 1 << 0,
-    FlagSymbolLeft                      = 1 << 1,
-    FlagSymbolHalfLeft                  = 1 << 2,
-    FlagSymbolStraight                  = 1 << 3,
-    FlagSymbolHalfRight                 = 1 << 4,
-    FlagSymbolRight                     = 1 << 5,
-    FlagSymbolUTurnRight                = 1 << 6,
-
-    FlagLineIntrLineWithLongLines       = 1 << 7,
-    FlagLineDoubleSolidLine             = 1 << 8,
-    FlagLineSingleSolidLine             = 1 << 9,
-    FlagLineCombinedSingleSolidAndIntr  = 1 << 10,
-    FlagLineCombinedIntrAndSingleSolid  = 1 << 11,
-    FlagLineIntrLineWithShortLines      = 1 << 12,
-
-    FlagLaneTake                        = 1 << 15,
-    };
-
-    int startLane = 0;
-    for (int i = 0; i < lanesCount; ++i)
-    {
-        LaneInfo lane = pData[i];
-        if (lane & FlagLaneTake)
-        {
-            if (i - startLane > (MAX_LANES - 1))
-                startLane = i - (MAX_LANES - 1);
-            break;
-        }
-    }
-    
-    for (int i = startLane; i < lanesCount; ++i)
-    {
-        LaneInfo lane = pData[i];
-
-        const uint8_t colorFlag = 0x01;
-        uint8_t highlight = 0x00;
-        if (lane & FlagLaneTake)
-            highlight = 0x0F;
-            
-        if (lane & FlagSymbolHalfLeft)
-        {
-            if (lane & FlagSymbolStraight)
-                lane |= FlagSymbolLeft; //visually 2 images cannot mix "slightly left and strait", so draw "straight & left"
-            else
-                Draw4bitImageProgmemReplacing(xOffset, yOffset, IMG_WIDTH, IMG_HEIGHT, IMG_SymbolHalfLeft, colorFlag, highlight);
-        }
-        if (lane & FlagSymbolLeft)
-            Draw4bitImageProgmemReplacing(xOffset, yOffset, IMG_WIDTH, IMG_HEIGHT, IMG_SymbolLeft, colorFlag, highlight);
-        if (lane & FlagSymbolUTurnLeft)
-            Draw4bitImageProgmemReplacing(xOffset - xDeltaUTurn, yOffset, IMG_WIDTH, IMG_HEIGHT, IMG_SymbolUTurnLeft, colorFlag, highlight);
-            
-        if (lane & FlagSymbolHalfRight)
-        {
-            if (lane & FlagSymbolStraight)
-                lane |= FlagSymbolRight; //visually 2 images cannot mix "slightly right and strait", so draw "straight & right"
-            else
-                Draw4bitImageProgmemReplacing(xOffset, yOffset, IMG_WIDTH, IMG_HEIGHT, IMG_SymbolHalfRight, colorFlag, highlight);
-        }
-        if (lane & FlagSymbolRight)
-            Draw4bitImageProgmemReplacing(xOffset, yOffset, IMG_WIDTH, IMG_HEIGHT, IMG_SymbolRight, colorFlag, highlight);
-        if (lane & FlagSymbolUTurnRight)
-            Draw4bitImageProgmemReplacing(xOffset + xDeltaUTurn, yOffset, IMG_WIDTH, IMG_HEIGHT, IMG_SymbolUTurnRight, colorFlag, highlight);
-        
-        if (lane & FlagSymbolStraight)
-            Draw4bitImageProgmemReplacing(xOffset, yOffset, IMG_WIDTH, IMG_HEIGHT, IMG_SymbolStraight, colorFlag, highlight);
-            
-        xOffset += IMG_WIDTH;
-    }
-}
-
 const uint8_t* ImageFromDirection(uint8_t direction)
 {
     switch (direction)
     {
-        case DirectionStart:      return IMG_directionStart;
-        case DirectionEasyLeft:   return IMG_directionEasyLeft;
-        case DirectionEasyRight:  return IMG_directionEasyRight;
-        case DirectionEnd:        return IMG_directionEnd;
-        case DirectionVia:        return IMG_directionEnd;
-        case DirectionKeepLeft:   return IMG_directionKeepLeft;
-        case DirectionKeepRight:  return IMG_directionKeepRight;
-        case DirectionLeft:       return IMG_directionLeft;
-        case DirectionRight:      return IMG_directionRight;
-        case DirectionSharpLeft:  return IMG_directionSharpLeft;
+        case DirectionNone: return nullptr;
+        case DirectionStart: return IMG_directionWaypoint;
+        case DirectionEasyLeft: return IMG_directionEasyLeft;
+        case DirectionEasyRight: return IMG_directionEasyRight;
+        case DirectionEnd: return IMG_directionWaypoint;
+        case DirectionVia: return IMG_directionWaypoint;
+        case DirectionKeepLeft: return IMG_directionKeepLeft;
+        case DirectionKeepRight: return IMG_directionKeepRight;
+        case DirectionLeft: return IMG_directionLeft;
+        case DirectionOutOfRoute: return IMG_directionOutOfRoute;
+        case DirectionRight: return IMG_directionRight;
+        case DirectionSharpLeft: return IMG_directionSharpLeft;
         case DirectionSharpRight: return IMG_directionSharpRight;
-        case DirectionStraight:   return IMG_directionStraight;
-        case DirectionUTurnLeft:  return IMG_directionUTurnLeft;
+        case DirectionStraight: return IMG_directionStraight;
+        case DirectionUTurnLeft: return IMG_directionUTurnLeft;
         case DirectionUTurnRight: return IMG_directionUTurnRight;
-        //right side roundabouts
-        case DirectionRoundaboutSE:  return IMG_directionRoundRSE;
-        case DirectionRoundaboutE:   return IMG_directionRoundRE;
-        case DirectionRoundaboutNE:  return IMG_directionRoundRNE;
-        case DirectionRoundaboutN:   return IMG_directionRoundRN;
-        case DirectionRoundaboutNW:  return IMG_directionRoundRNW;
-        case DirectionRoundaboutW:   return IMG_directionRoundRW;
-        case DirectionRoundaboutSW:  return IMG_directionRoundRSW;
-        case DirectionRoundaboutS:   return IMG_directionRoundRS;
-        //left side roundabouts
-        case DirectionRoundaboutSE + 8: return IMG_directionRoundLSE;
-        case DirectionRoundaboutE  + 8: return IMG_directionRoundLE;
-        case DirectionRoundaboutNE + 8: return IMG_directionRoundLNE;
-        case DirectionRoundaboutN  + 8: return IMG_directionRoundLN;
-        case DirectionRoundaboutNW + 8: return IMG_directionRoundLNW;
-        case DirectionRoundaboutW  + 8: return IMG_directionRoundLW;
-        case DirectionRoundaboutSW + 8: return IMG_directionRoundLSW;
-        case DirectionRoundaboutS  + 8: return IMG_directionRoundLS;
-        case DirectionFerry:         return IMG_directionFerry;
+        case DirectionFerry: return IMG_directionFerry;
         case DirectionStateBoundary: return IMG_directionStateBoundary;
-        case DirectionExitRight:     return IMG_directionExitRight;
-        case DirectionFollow:        return IMG_directionFollow;
-        case DirectionExitLeft:      return IMG_directionExitLeft;
-        case DirectionMotorway:      return IMG_directionMotorway;
+        case DirectionFollow: return IMG_directionFollow;
+        case DirectionMotorway: return IMG_directionMotorway;
+        case DirectionTunnel: return IMG_directionTunnel;
+        case DirectionExitLeft: return IMG_directionExitLeft;
+        case DirectionExitRight: return IMG_directionExitRight;
+        case DirectionRoundaboutRSE: return IMG_directionRoundaboutRSE;
+        case DirectionRoundaboutRE: return IMG_directionRoundaboutRE;
+        case DirectionRoundaboutRNE: return IMG_directionRoundaboutRNE;
+        case DirectionRoundaboutRN: return IMG_directionRoundaboutRN;
+        case DirectionRoundaboutRNW: return IMG_directionRoundaboutRNW;
+        case DirectionRoundaboutRW: return IMG_directionRoundaboutRW;
+        case DirectionRoundaboutRSW: return IMG_directionRoundaboutRSW;
+        case DirectionRoundaboutRS: return IMG_directionRoundaboutRS;
+        case DirectionRoundaboutLSE: return IMG_directionRoundaboutLSE;
+        case DirectionRoundaboutLE: return IMG_directionRoundaboutLE;
+        case DirectionRoundaboutLNE: return IMG_directionRoundaboutLNE;
+        case DirectionRoundaboutLN: return IMG_directionRoundaboutLN;
+        case DirectionRoundaboutLNW: return IMG_directionRoundaboutLNW;
+        case DirectionRoundaboutLW: return IMG_directionRoundaboutLW;
+        case DirectionRoundaboutLSW: return IMG_directionRoundaboutLSW;
+        case DirectionRoundaboutLS: return IMG_directionRoundaboutLS;
     }
-    return IMG_directionOutOfRoute;
+    return IMG_directionError;
 }
 
 void RedrawFromCanvas()
@@ -656,7 +343,6 @@ void RedrawFromCanvas()
     auto pCanvas = reinterpret_cast<const uint8_t*>(g_canvas);
     const int SCREEN_WIDTH = 128;
     const int SCREEN_HEIGHT = 128;
-
 
     OLED_WriteReg(0x5c); //write RAM mode
     if (g_drawingMode == DrawingModeMirror)
@@ -699,10 +385,7 @@ void RedrawFromCanvas()
             OLED_WriteData(pCanvas[i - 1]);
         }
     }
-//    
-//    Send4bitFromEachByte(g_canvas, 128 * 128);
 }
-
 
 void Send4bitFromEachByte(const uint8_t* pBmp, uint16_t sizeBytes)
 {
@@ -746,32 +429,6 @@ void Draw4bitImageProgmem(int x, int y, int width, int height, const uint8_t* pB
 
         SetPixelCanvas(xLeft, yLeft, Color4To16bit(leftPixel));
         SetPixelCanvas(xRight, yRight, Color4To16bit(rightPixel));
-    }
-}
-
-void Draw4bitImageProgmemReplacing(int x, int y, int width, int height, const uint8_t* pBmp, uint8_t toReplace, uint8_t replaceWith)
-{
-    const int BYTES_IN_ROW = 128;
-    const int sizePixels = width * height;
-    for (int i = 1; i < sizePixels; i += 2)
-    {
-        uint8_t data = pgm_read_byte(pBmp++);
-        uint8_t leftPixel = (data & 0x0F);
-        uint8_t rightPixel = (data & 0xF0) >> 4;
-
-        if (leftPixel == toReplace)
-            leftPixel = replaceWith;
-        if (rightPixel == toReplace)
-            rightPixel = replaceWith;
-
-        int yLeft = y + (i - 1) / width;
-        int xLeft = x + (i - 1) % width;
-                
-        int yRight = y + i / width;
-        int xRight = x + i % width;
-
-        SetPixelCanvasIfNot0(xLeft, yLeft, Color4To16bit(leftPixel));
-        SetPixelCanvasIfNot0(xRight, yRight, Color4To16bit(rightPixel));
     }
 }
 

@@ -4,6 +4,8 @@ https://www.facebook.com/story.php?story_fbid=10156820199717852&id=92684932851
 
 ![Prototype](/images/IMG_BLE_HUD.png)
 
+Bluetooth Low Energy head-up display
+
 ## How it works
 The application on the phone sends instructions to ESP32 using Bluetooth Low Energy:
 * The phone acts as BLE Central (also called Master, Client)

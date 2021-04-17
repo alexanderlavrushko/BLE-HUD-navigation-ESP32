@@ -44,7 +44,7 @@ Characteristic for data write | DD3F0AD3-6239-4E1F-81F1-91F6C9F01D86
 ### TTGO T-Display
 To enable TTGO T-Display:
 1. Download library [TFT_eSPI adjusted by TTGO](https://github.com/Xinyuan-LilyGO/TTGO-T-Display), copy TFT_eSPI folder to Arduino/libraries
-1. Uncomment display in code [here](https://github.com/alexanderlavrushko/BLE-HUD-navigation-ESP32/blob/7ac0d89f6ebf7e61cd1604369700daa455fdf0a5/ESP32-Arduino/BLEHUDNaviESP32/BLEHUDNaviESP32.ino#L26), and comment out the previous display
+1. Uncomment display in code [here](https://github.com/alexanderlavrushko/BLE-HUD-navigation-ESP32/blob/db1b32a6adf7e0bfbae3ad235736fa7cd571c252/ESP32-Arduino/BLEHUDNaviESP32/BLEHUDNaviESP32.ino#L26), and comment out the previous display
 
 ### Display OLED 128x128
 Display: Waveshare 14747 128x128 OLED RGB ([link](https://www.waveshare.com/1.5inch-rgb-oled-module.htm))

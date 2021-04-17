@@ -2,37 +2,45 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
-#include <SPI.h>
-#include "OLED.h"
+#include "IDisplay.h"
 #include "ImagesOther.h"
 #include "ImagesDirections.h"
 #include "ImagesLanes.h"
-#include "Font8x8.h"
-#include "GlyphShifter.h"
+#include "Font8x8GlyphShifter.h"
 #include "DataConstants.h"
 
-#define SERVICE_UUID        "DD3F0AD1-6239-4E1F-81F1-91F6C9F01D86"
-#define CHAR_INDICATE_UUID  "DD3F0AD2-6239-4E1F-81F1-91F6C9F01D86"
-#define CHAR_WRITE_UUID     "DD3F0AD3-6239-4E1F-81F1-91F6C9F01D86"
+// -----------------
+// Display selection
+// Uncomment wanted display with corresponding header
+// -----------------
+
+// OLED 128x128 RGB, Waveshare 14747, driver SSD1351
+// Doesn't require external libraries
+// Pins: DIN=23, CLK=18, CS=5, DC=17, RST=16, uses SPIClass(VSPI)
+#include "OLED_SSD1351_nolib.h"
+OLED_SSD1351_nolib selectedDisplay;
+
+// TTGO T-Display TFT 135x240
+// Requires library TFT_eSPI from here: https://github.com/Xinyuan-LilyGO/TTGO-T-Display
+// (copy TFT_eSPI to Arduino/libraries)
+//#include "TFT_TTGO.h"
+//TFT_TTGO selectedDisplay;
 
 // ---------------------
 // Variables for display
 // ---------------------
-const byte MIN_CHAR_WIDTH = 3;
-const byte SPACE_BETWEEN_CHARS = 1;
-enum DrawingMode
-{
-    DrawingModeNormal = 0,
-    DrawingModeMirror,
-    DrawingMode180,
-    DrawingMode180Mirror,
-    DrawingModeCount
-};
+IDisplay& g_display = selectedDisplay;
+const int CANVAS_WIDTH = g_display.GetWidth();
+const int CANVAS_HEIGHT = g_display.GetHeight();
+const int CANVAS_SIZE_BYTES = CANVAS_WIDTH * CANVAS_HEIGHT * sizeof(uint16_t);
+uint16_t* g_canvas = NULL;
 
-const int spiClk = 32000000; // 32 MHz (40 MHz causes problems, about 1% of bytes are not received by display)
-
-uint16_t g_canvas[128 * 128] = {};
-DrawingMode g_drawingMode = DrawingModeNormal;
+// ---------------------
+// BLE constants
+// ---------------------
+#define SERVICE_UUID        "DD3F0AD1-6239-4E1F-81F1-91F6C9F01D86"
+#define CHAR_INDICATE_UUID  "DD3F0AD2-6239-4E1F-81F1-91F6C9F01D86"
+#define CHAR_WRITE_UUID     "DD3F0AD3-6239-4E1F-81F1-91F6C9F01D86"
 
 // -----------------
 // Variables for BLE
@@ -44,6 +52,9 @@ uint32_t g_lastActivityTime = 0;
 bool g_isNaviDataUpdated = false;
 std::string g_naviData;
 
+// ---------------------
+// Bluetooth event callbacks
+// ---------------------
 class MyServerCallbacks: public BLEServerCallbacks
 {
     void onConnect(BLEServer* pServer) override
@@ -80,31 +91,13 @@ void setup()
     Serial.begin(115200);
     Serial.println("BLENaviPeripheral2 setup() started");
 
-    //init SPI
-    pinMode(OLED_PIN_DC, OUTPUT);
-    pinMode(OLED_PIN_RST, OUTPUT);
+    g_display.Init();
+    g_canvas = new uint16_t[CANVAS_WIDTH * CANVAS_HEIGHT];
 
-//    OLED_PIN_RST_0;
-//    delay(500);
-    OLED_PIN_RST_1;
-    delay(200);
-
-    vspi = new SPIClass(VSPI);
-    vspi->begin();
-    vspi->setHwCs(true);
-
-    vspi->beginTransaction(SPISettings(spiClk, MSBFIRST, SPI_MODE0));
-
-    OLED_InitReg(false);
-
-    delay(200);
-
-    memset(g_canvas, 0, sizeof(g_canvas));
+    memset(g_canvas, 0, CANVAS_SIZE_BYTES);
     Draw4bitImageProgmem(0, 32, 128, 64, IMG_logoTbt128x64);
     Draw4bitImageProgmem(0, 0, 32, 32, IMG_logoBluetooth32x32);
     RedrawFromCanvas();
-
-    OLED_WriteReg(0xAF); //Turn on the OLED display
 
     Serial.println("Display init done");
 
@@ -154,7 +147,7 @@ void loop()
             std::string currentData = g_naviData;
             if (currentData.size() > 0)
             {
-                memset(g_canvas, 0, sizeof(g_canvas));
+                memset(g_canvas, 0, CANVAS_SIZE_BYTES);
                 if (currentData[0] == 1)
                 {
                     Serial.print("Reading basic data: length = ");
@@ -206,9 +199,10 @@ void loop()
     }
     else if (millis() > 3000)
     {
-        const int yOffset = 128 - 16 - 1;
-        const int rowSize = 128 * 2;
-        memset((uint8_t*)g_canvas + yOffset * rowSize, 0, 16 * rowSize);
+        const int textHeight = 16;
+        const int yOffset = 128 - textHeight - 1;
+        const int rowSize = 128 * sizeof(uint16_t);
+        memset((uint8_t*)g_canvas + yOffset * rowSize, 0, textHeight * rowSize);
         DrawMessage("Disconnected", 0, yOffset, 2, true, 0xFFFF);
         RedrawFromCanvas();
     }
@@ -236,7 +230,7 @@ void DrawMessage(const char* msg, int xStart, int yStart, int scale, bool overwr
                 return;
             continue;
         }
-        shifter.PutGlyph(Font8x8::FormatChar(msg[charIndex]), MIN_CHAR_WIDTH, SPACE_BETWEEN_CHARS);
+        shifter.PutChar(msg[charIndex]);
         while (shifter.HasGlyph())
         {
             uint8_t column = shifter.ShiftLeft();
@@ -338,65 +332,7 @@ const uint8_t* ImageFromDirection(uint8_t direction)
 
 void RedrawFromCanvas()
 {
-    SetDrawArea(0, 0, 128, 128);
-
-    auto pCanvas = reinterpret_cast<const uint8_t*>(g_canvas);
-    const int SCREEN_WIDTH = 128;
-    const int SCREEN_HEIGHT = 128;
-
-    OLED_WriteReg(0x5c); //write RAM mode
-    if (g_drawingMode == DrawingModeMirror)
-    {
-        for (int y = SCREEN_HEIGHT - 1; y >= 0; --y)
-        {
-            for (int x = 0; x < SCREEN_WIDTH; ++x)
-            {
-                const int i = (y * SCREEN_WIDTH + x) * sizeof(g_canvas[0]);
-                OLED_WriteData(pCanvas[i + 1]);
-                OLED_WriteData(pCanvas[i]);
-            }
-        }
-    }
-    else if (g_drawingMode == DrawingMode180Mirror)
-    {
-        for (int y = 0; y < SCREEN_HEIGHT; ++y)
-        {
-            for (int x = SCREEN_WIDTH - 1; x >= 0; --x)
-            {
-                const int i = (y * SCREEN_WIDTH + x) * sizeof(g_canvas[0]);
-                OLED_WriteData(pCanvas[i + 1]);
-                OLED_WriteData(pCanvas[i]);
-            }
-        }
-    }
-    else if (g_drawingMode == DrawingMode180)
-    {
-        for (int i = sizeof(g_canvas) - 1; i > 0; i -= sizeof(g_canvas[0]))
-        {
-            OLED_WriteData(pCanvas[i]);
-            OLED_WriteData(pCanvas[i - 1]);
-        }
-    }
-    else
-    {
-        for (int i = 1; i < sizeof(g_canvas); i += sizeof(g_canvas[0]))
-        {
-            OLED_WriteData(pCanvas[i]);
-            OLED_WriteData(pCanvas[i - 1]);
-        }
-    }
-}
-
-void Send4bitFromEachByte(const uint8_t* pBmp, uint16_t sizeBytes)
-{
-    OLED_WriteReg(0x5c); //write RAM mode
-    for (uint16_t i = 0; i < sizeBytes; ++i)
-    {
-        uint16_t data = Color4To16bit(0b11110000 ^ pBmp[i]);
-        
-        OLED_WriteData(static_cast<uint8_t>(data >> 8));
-        OLED_WriteData(static_cast<uint8_t>(data));
-    }
+    g_display.SendImage(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, g_canvas);
 }
 
 void DrawImageProgmem(int xStart, int yStart, int width, int height, const uint16_t* pBmp)
@@ -411,9 +347,33 @@ void DrawImageProgmem(int xStart, int yStart, int width, int height, const uint1
     }
 }
 
+uint16_t Color4To16bit(uint16_t color4bit)
+{
+    color4bit &= 0x0F;
+    uint16_t color16bit = 0;
+
+    const uint16_t maxColor4bit = 0x0F;
+    const uint16_t maxColor5bit = 0x1F;
+    const uint16_t maxColor6bit = 0x3F;
+    
+    const uint16_t red   = color4bit * maxColor5bit / maxColor4bit;
+    const uint16_t green = color4bit * maxColor6bit / maxColor4bit;
+    const uint16_t blue  = color4bit * maxColor5bit / maxColor4bit;
+
+    //color 16 bit: rrrrrggg gggbbbbb
+    color16bit |= red << 11;
+    color16bit |= green << 5;
+    color16bit |= blue;
+    
+//    if (color4bit & 0b10000000 || (color4bit & 0xF0) == 0) color16bit |= (0x0F & color4bit) << 12; //red, 5 bit
+//    if (color4bit & 0b01000000 || (color4bit & 0xF0) == 0) color16bit |= (0x0F & color4bit) << 7;  //green, 6 bit
+//    if (color4bit & 0b00100000 || (color4bit & 0xF0) == 0) color16bit |= (0x0F & color4bit) << 1;  //blue, 5 bit
+
+    return color16bit;
+}
+
 void Draw4bitImageProgmem(int x, int y, int width, int height, const uint8_t* pBmp)
 {
-    const int BYTES_IN_ROW = 128;
     const int sizePixels = width * height;
     for (int i = 1; i < sizePixels; i += 2)
     {
@@ -434,9 +394,8 @@ void Draw4bitImageProgmem(int x, int y, int width, int height, const uint8_t* pB
 
 void SetPixelCanvas(int x, int y, uint16_t value)
 {
-    const int BYTES_IN_ROW = 128;
-    int indexDestination = y * BYTES_IN_ROW + x;
-    if (indexDestination < sizeof(g_canvas) / sizeof(g_canvas[0]))
+    int indexDestination = y * CANVAS_WIDTH + x;
+    if (indexDestination < CANVAS_WIDTH * CANVAS_HEIGHT)
         g_canvas[indexDestination] = value;
 }
 
@@ -448,16 +407,14 @@ void SetPixelCanvasIfNot0(int x, int y, uint16_t value)
 
 void DrawColumn8(uint8_t x, uint8_t y, uint8_t columnData, int scale, bool overwrite, uint16_t color)
 {
-    const uint16_t BYTES_IN_ROW = 128;
-
     uint8_t mask = 1;
     for (uint8_t row = 0; row < Font8x8::HEIGHT * scale; row += scale)
     {
         for (int fillIndex = 0; fillIndex < scale * scale; ++fillIndex)
         {
             uint8_t yDestination = y + row + fillIndex / scale;
-            uint16_t drawIndex = yDestination * BYTES_IN_ROW + x + fillIndex % scale;
-            if (drawIndex >= sizeof(g_canvas) / sizeof(g_canvas[0]))
+            uint16_t drawIndex = yDestination * CANVAS_WIDTH + x + fillIndex % scale;
+            if (drawIndex >= CANVAS_WIDTH * CANVAS_HEIGHT)
                 return;
     
             if (columnData & mask)

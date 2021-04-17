@@ -1,10 +1,13 @@
 #ifndef GLYPHSHIFTER_H_INCLUDED
 #define GLYPHSHIFTER_H_INCLUDED
 
-#include "Font8x8Common.h"
+#include "Font8x8.h"
 
 namespace Font8x8
 {
+
+const byte MIN_CHAR_WIDTH = 3;
+const byte SPACE_BETWEEN_CHARS = 1;
 
 class GlyphShifter
 {
@@ -27,6 +30,11 @@ public:
         if (m_spaceBeforeGlyph > 0)
             return true;
         return !IsDataEmpty();
+    }
+
+    void PutChar(const char c)
+    {
+        PutGlyph(FormatChar(c), MIN_CHAR_WIDTH, SPACE_BETWEEN_CHARS);
     }
 
     void PutGlyph(const byte* data, byte minWidth, byte spaceBeforeGlyph)

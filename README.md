@@ -1,17 +1,19 @@
-# BLE-HUD-navigation-ESP32
+# Bluetooth Low Energy head-up display
 
 https://www.facebook.com/story.php?story_fbid=10156820199717852&id=92684932851
 
 ![Prototype](/images/IMG_BLE_HUD.png)
-
-Bluetooth Low Energy head-up display
 
 ## How it works
 The application on the phone sends instructions to ESP32 using Bluetooth Low Energy:
 * The phone acts as BLE Central (also called Master, Client)
 * ESP32 acts as BLE Peripheral (also called Slave, Server)
 
-### Compatible applications
+### Supported modules
+* ESP32 with external OLED display 128x128 (enabled by-default), [how to connect](https://github.com/alexanderlavrushko/BLE-HUD-navigation-ESP32#display-oled-128x128)
+* ESP32 TTGO T-Display with embedded TFT 135x240, [how to enable](https://github.com/alexanderlavrushko/BLE-HUD-navigation-ESP32#ttgo-t-display)
+
+### Application iOS
 Currently the only compatible application is available on iOS: [GPS Navigation by Tripomatic](https://apps.apple.com/app/gps-navigation-maps/id1206711655).
 
 To enable BLE HUD in the app (it's an unofficial prototype feature):
@@ -19,10 +21,8 @@ To enable BLE HUD in the app (it's an unofficial prototype feature):
 * Bluetooth permission required
 
 Notes:
-* While the feature is enabled, the application automatically scans and connects to ESP32 module when possible
-* Instructions are sent only while the app in foreground and the screen is on (maybe even for a few seconds after going to background)
-  * *Sending instructions in background is technically possible, I hope it will be available soon*
-* After temporarily going to background, the app restores BLE connection as soon as it becomes active again
+* When enabled, the application automatically scans and connects to ESP32 module (app must be in foreground)
+* If connected to ESP32 and the route is set, the app can also send instructions from background
 * The feature becomes off after restarting the application
 
 ### Application lifecycle
@@ -41,8 +41,13 @@ Service | DD3F0AD1-6239-4E1F-81F1-91F6C9F01D86
 Characteristic for indicate | DD3F0AD2-6239-4E1F-81F1-91F6C9F01D86
 Characteristic for data write | DD3F0AD3-6239-4E1F-81F1-91F6C9F01D86
 
-### Display
-Display: Waveshare WS14747 128x128 OLED RGB ([link](https://www.waveshare.com/1.5inch-rgb-oled-module.htm))
+### TTGO T-Display
+To enable TTGO T-Display:
+1. Download library [TFT_eSPI adjusted by TTGO](https://github.com/Xinyuan-LilyGO/TTGO-T-Display), copy TFT_eSPI folder to Arduino/libraries
+1. Uncomment display in code [here](https://github.com/alexanderlavrushko/BLE-HUD-navigation-ESP32/blob/7ac0d89f6ebf7e61cd1604369700daa455fdf0a5/ESP32-Arduino/BLEHUDNaviESP32/BLEHUDNaviESP32.ino#L26), and comment out the previous display
+
+### Display OLED 128x128
+Display: Waveshare 14747 128x128 OLED RGB ([link](https://www.waveshare.com/1.5inch-rgb-oled-module.htm))
 
 Protocol: SSD1351
 

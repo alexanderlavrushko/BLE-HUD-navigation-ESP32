@@ -2,6 +2,7 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
+#include <Button2.h> // available in Arduino libraries, or https://github.com/LennartHennigs/Button2
 #include "IDisplay.h"
 #include "ImagesOther.h"
 #include "ImagesDirections.h"
@@ -36,11 +37,15 @@ const int CANVAS_SIZE_BYTES = CANVAS_WIDTH * CANVAS_HEIGHT * sizeof(uint16_t);
 uint16_t* g_canvas = NULL;
 
 // ---------------------
-// BLE constants
+// Constants
 // ---------------------
 #define SERVICE_UUID        "DD3F0AD1-6239-4E1F-81F1-91F6C9F01D86"
 #define CHAR_INDICATE_UUID  "DD3F0AD2-6239-4E1F-81F1-91F6C9F01D86"
 #define CHAR_WRITE_UUID     "DD3F0AD3-6239-4E1F-81F1-91F6C9F01D86"
+
+#define COLOR_BLACK    0x0000
+#define COLOR_WHITE    0xFFFF
+#define COLOR_MAGENTA  0xF81F
 
 // -----------------
 // Variables for BLE
@@ -51,6 +56,29 @@ bool g_deviceConnected = false;
 uint32_t g_lastActivityTime = 0;
 bool g_isNaviDataUpdated = false;
 std::string g_naviData;
+
+// --------
+// Buttons
+// --------
+#define TTGO_LEFT_BUTTON 0
+#define GPIO_NUM_TTGO_LEFT_BUTTON GPIO_NUM_0
+
+//#define TTGO_RIGHT_BUTTON 35
+//#define GPIO_NUM_TTGO_RIGHT_BUTTON GPIO_NUM_35
+
+#define BUTTON_DEEP_SLEEP TTGO_LEFT_BUTTON
+#define GPIO_NUM_WAKEUP GPIO_NUM_TTGO_LEFT_BUTTON
+
+class Button2Extended : public Button2
+{
+public:
+    Button2Extended(byte pin) : Button2(pin) {}
+    unsigned long currentlyPressedDuration()
+    {
+        return (state == pressed ? millis() - down_ms: 0);
+    }
+};
+Button2Extended g_btnDeepSleep(BUTTON_DEEP_SLEEP);
 
 // ---------------------
 // Bluetooth event callbacks
@@ -133,12 +161,31 @@ void setup()
     BLEDevice::startAdvertising();
     Serial.println("BLE init done");
 
+    // setup deep sleep button
+    g_btnDeepSleep.setLongClickTime(500);
+    g_btnDeepSleep.setLongClickHandler([](Button2& b) {
+        g_display.EnterSleepMode();
+
+        esp_sleep_enable_ext0_wakeup(GPIO_NUM_WAKEUP, 0);
+        delay(200);
+        esp_deep_sleep_start();
+    });
+
     Serial.println("setup() finished");
 }
 
 void loop()
 {
-    if (g_deviceConnected)
+    g_btnDeepSleep.loop();
+    if (g_btnDeepSleep.currentlyPressedDuration() >= g_btnDeepSleep.getLongClickTime())
+    {
+        const int16_t textHeight = 16;
+        const int16_t yOffset = CANVAS_HEIGHT - textHeight;
+        FillRect(0, yOffset, CANVAS_WIDTH, textHeight, COLOR_BLACK);
+        DrawMessage("SLEEP", 0, yOffset, 2, true, COLOR_MAGENTA);
+        RedrawFromCanvas();
+    }
+    else if (g_deviceConnected)
     {
         if (g_isNaviDataUpdated)
         {
@@ -199,11 +246,10 @@ void loop()
     }
     else if (millis() > 3000)
     {
-        const int textHeight = 16;
-        const int yOffset = 128 - textHeight - 1;
-        const int rowSize = 128 * sizeof(uint16_t);
-        memset((uint8_t*)g_canvas + yOffset * rowSize, 0, textHeight * rowSize);
-        DrawMessage("Disconnected", 0, yOffset, 2, true, 0xFFFF);
+        const int16_t textHeight = 16;
+        const int16_t yOffset = CANVAS_HEIGHT - textHeight;
+        FillRect(0, yOffset, CANVAS_WIDTH, textHeight, COLOR_BLACK);
+        DrawMessage("Disconnected", 0, yOffset, 2, true, COLOR_WHITE);
         RedrawFromCanvas();
     }
     delay(10);
@@ -424,5 +470,29 @@ void DrawColumn8(uint8_t x, uint8_t y, uint8_t columnData, int scale, bool overw
         }        
 
         mask <<= 1;
+    }
+}
+
+void FillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t color)
+{
+    if (x >= CANVAS_WIDTH ||
+        y >= CANVAS_HEIGHT ||
+        width <= 0 ||
+        height <= 0)
+    {
+        return;
+    }
+
+    int16_t xStart = max(x, int16_t(0));
+    int16_t yStart = max(y, int16_t(0));
+    int16_t xEnd = min(x + width, CANVAS_WIDTH);
+    int16_t yEnd = min(y + height, CANVAS_HEIGHT);
+
+    for (int16_t y = yStart; y < yEnd; ++y)
+    {
+        for (int16_t x = xStart; x < xEnd; ++x)
+        {
+            g_canvas[y * CANVAS_WIDTH + x] = color; 
+        }
     }
 }

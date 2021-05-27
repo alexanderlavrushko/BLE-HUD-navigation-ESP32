@@ -25,6 +25,7 @@ public:
                    const int width,
                    const int height,
                    const uint16_t* data) override;
+    void EnterSleepMode() override;
 
 private:
     void WriteReg(uint8_t reg);

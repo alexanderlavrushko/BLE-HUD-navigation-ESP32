@@ -68,6 +68,11 @@ void OLED_SSD1351_nolib::SendImage(const int xStart,
     }
 }
 
+void OLED_SSD1351_nolib::EnterSleepMode()
+{
+    WriteReg(0xAE); // turn off the OLED display
+}
+
 void OLED_SSD1351_nolib::WriteReg(uint8_t reg)
 {
     digitalWrite(m_pinDC, LOW);

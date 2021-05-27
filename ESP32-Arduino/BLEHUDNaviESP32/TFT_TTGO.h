@@ -28,6 +28,7 @@ public:
                    const int width,
                    const int height,
                    const uint16_t* data) override;
+    void EnterSleepMode() override;
 
 private:
     TFT_eSPI m_tft;

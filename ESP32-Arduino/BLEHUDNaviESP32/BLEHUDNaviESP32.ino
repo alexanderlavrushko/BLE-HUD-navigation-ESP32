@@ -318,6 +318,8 @@ void DrawSpeed(uint8_t speed)
         x = 20;
     else if (speed <= 19)
         x = 14;
+    else if (speed >= 40 && speed <= 49)
+        x = 7;
     else if (speed >= 100)
     {
         y = 22;

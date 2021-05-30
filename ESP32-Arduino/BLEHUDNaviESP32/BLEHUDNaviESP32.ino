@@ -258,8 +258,8 @@ void DrawMessage(const char* msg, int xStart, int yStart, int scale, bool overwr
 {
     const int lineHeight = 8 * scale + 4;
 
-    const int xEnd = 120;
-    const int yEnd = 120;
+    const int xEnd = CANVAS_WIDTH - scale;
+    const int yEnd = CANVAS_HEIGHT - scale;
 
     int x = xStart;
     int y = yStart;
@@ -271,7 +271,7 @@ void DrawMessage(const char* msg, int xStart, int yStart, int scale, bool overwr
         {
             x = xStart;
             y += lineHeight;
-            if (y > yEnd)
+            if (y >= yEnd)
                 return;
             continue;
         }
@@ -281,11 +281,11 @@ void DrawMessage(const char* msg, int xStart, int yStart, int scale, bool overwr
             uint8_t column = shifter.ShiftLeft();
             DrawColumn8(x, y, column, scale, overwrite, color);
             x += scale;
-            if (x > xEnd)
+            if (x >= xEnd)
             {
                 x = xStart;
                 y += lineHeight;
-                if (y > yEnd)
+                if (y >= yEnd)
                     return;
             }
         }

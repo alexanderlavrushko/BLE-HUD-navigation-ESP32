@@ -308,7 +308,7 @@ void DrawSpeed(uint8_t speed)
 
     char str[4] = {};
     sprintf(str, "%u", (unsigned int)speed);
-    DrawImageProgmem(64, 0, 64, 64, reinterpret_cast<const uint16_t*>(IMG_Speed64rgb));
+    DrawImageProgmem(64, 0, 64, 64, reinterpret_cast<const uint16_t*>(IMG_speedLimit64x64_16b));
 
     int x = 10;
     int y = 18;

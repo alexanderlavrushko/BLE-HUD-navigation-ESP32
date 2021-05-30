@@ -123,8 +123,7 @@ void setup()
     g_canvas = new uint16_t[CANVAS_WIDTH * CANVAS_HEIGHT];
 
     memset(g_canvas, 0, CANVAS_SIZE_BYTES);
-    Draw4bitImageProgmem(0, 32, 128, 64, IMG_logoTbt128x64);
-    Draw4bitImageProgmem(0, 0, 32, 32, IMG_logoBluetooth32x32);
+    Draw4bitImageProgmem(0, 32, 128, 64, IMG_logoTbt128x64_4b);
     RedrawFromCanvas();
 
     Serial.println("Display init done");

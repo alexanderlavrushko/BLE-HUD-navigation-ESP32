@@ -1,6 +1,27 @@
 #ifndef COLORCONVERSION_H_INCLUDED
 #define COLORCONVERSION_H_INCLUDED
 
+typedef uint16_t (*colorConversionFunction)(uint16_t);
+
+static uint16_t Color2To16bit(uint16_t color2bit)
+{
+    // |-------------|-------------------|
+    // | color 2 bit |   color 16 bit    |
+    // |-------------|-------------------|
+    // | grayscale   | RGB (5:6:5)       |
+    // | 000000nn => | rrrrrggg gggbbbbb |
+    // | 000000ab => | ababaABA BABababa |
+    // |-------------|-------------------|
+
+    color2bit &= 0x03;
+    const uint16_t color5bit = (color2bit << 3) | (color2bit << 1) | (color2bit >> 1); // 000000ab => 000ababa
+    const uint16_t color6bit = (color2bit << 4) | (color2bit << 2) | (color2bit);      // 000000ab => 00ababab
+    const uint16_t r16 = color5bit << 11;
+    const uint16_t g16 = color6bit << 5;
+    const uint16_t b16 = color5bit;
+    return (r16 | g16 | b16);
+}
+
 static uint16_t Color4To16bit(uint16_t color4bit)
 {
     // |-------------|-------------------|

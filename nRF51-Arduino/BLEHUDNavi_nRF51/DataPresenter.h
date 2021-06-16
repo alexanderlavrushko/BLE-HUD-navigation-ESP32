@@ -5,15 +5,15 @@
 #include "HUDLayout.h"
 #include "GFXExtension.h"
 #include "ImagesOther.h"
-#include "ImagesDirections.h"
-#include "FontCompact6x8.h"
+#include "ImagesDirections_2bit.h"
+#include "FontCompact10px.h"
 #include "FontSpeedLimit.h"
 #include "FontSpeedLimitWide.h"
 
 class DataPresenter
 {
 public:
-    explicit DataPresenter(Adafruit_GFX* gfx, const HUDLayout* layout)
+    explicit DataPresenter(GFXAdapter8bit* gfx, const HUDLayout* layout)
     : m_gfx(gfx)
     , m_layout(layout)
     {
@@ -41,7 +41,7 @@ protected:
         const Rect2D& rc = m_layout->rcSpeed;
         if (1)
         {
-            m_gfx->drawRGBBitmap(rc.x, rc.y, reinterpret_cast<const uint16_t*>(IMG_Speed64x64_16b), rc.width, rc.height);
+            m_gfx->drawRGBBitmap8bitProgmem(rc.x, rc.y, IMG_Speed64x64_8b, rc.width, rc.height);
         }
         else
         {
@@ -75,13 +75,13 @@ protected:
         if (imageProgmem)
         {
             const Rect2D& rc = m_layout->rcInstruction;
-            draw4bitImageProgmem(m_gfx, rc.x, rc.y, rc.width, rc.height, imageProgmem);
+            drawGrayscaleImageProgmem(m_gfx, rc.x, rc.y, rc.width, rc.height, imageProgmem, /*bits per pixel*/2);
         }
     }
     
     void drawHUDMessage(const char* message)
     {
-        m_gfx->setFont(&FontCompact6x8);
+        m_gfx->setFont(&FontCompact10px);
     
         const int initialScale = 3;
         const int minScale = 3;
@@ -166,7 +166,7 @@ protected:
     }
 
 protected:
-    Adafruit_GFX* m_gfx;
+    GFXAdapter8bit* m_gfx;
     const HUDLayout* m_layout;
 };
 

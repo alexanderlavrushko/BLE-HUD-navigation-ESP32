@@ -33,6 +33,12 @@ public:
         m_peripheral.begin();
     }
 
+    bool isConnected()
+    {
+        BLECentral central = m_peripheral.central();
+        return central.connected();
+    }
+
     void checkData(HUDDataHandler hudHandler)
     {
         BLECentral central = m_peripheral.central();

@@ -24,6 +24,11 @@ struct Rect2D
         return y + height / 2;
     }
 
+    Point2D center() const
+    {
+        return { centerX(), centerY()};
+    }
+
     int16_t right() const
     {
         return x + width;

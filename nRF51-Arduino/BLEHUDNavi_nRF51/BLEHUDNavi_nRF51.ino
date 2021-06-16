@@ -21,6 +21,7 @@
 #include "GFXAdapter8bit.h"
 #include "DataPresenter.h"
 #include "Display_ST7735S_80x160.h"
+#include "FontCondensed16px.h"
 
 constexpr int CANVAS_WIDTH = 80;
 constexpr int CANVAS_HEIGHT = 160;
@@ -30,6 +31,8 @@ GFXAdapter8bit g_gfx(g_canvas, CANVAS_WIDTH, CANVAS_HEIGHT);
 Display_ST7735S_80x160 g_display;
 HUDLayout g_layout = {};
 BLEPeripheralHUD g_blePeripheral;
+bool g_lastConnectedState = false;
+uint32_t g_lastDisconnectTime = 0;
 
 void setup()
 {
@@ -37,7 +40,7 @@ void setup()
     g_layout.rcMessage = { 0, g_layout.rcInstruction.bottom(), CANVAS_WIDTH, 32 };
     g_layout.rcSpeed = { 8, g_layout.rcMessage.bottom(), 64, 64 }; 
 
-    draw4bitImageProgmem(&g_gfx, 0, 60, 80, 40, IMG_logoTbt80x40_4b);
+    drawLogo();
 
     g_display.begin();
     redrawFromCanvas();
@@ -48,12 +51,42 @@ void setup()
 
 void loop()
 {
-    g_blePeripheral.checkData([](const HUDData* hud)
+    if (g_blePeripheral.isConnected())
     {
-        DataPresenter presenter(&g_gfx, &g_layout);
-        presenter.presentData(hud);
+        if (!g_lastConnectedState)
+        {
+            g_gfx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, 0x0000);
+            redrawFromCanvas();
+            g_lastConnectedState = true;
+        }
+
+        g_blePeripheral.checkData([](const HUDData* hud)
+        {
+            DataPresenter presenter(&g_gfx, &g_layout);
+            presenter.presentData(hud);
+            redrawFromCanvas();
+        });
+    }
+    else if (g_lastConnectedState)
+    {
+        g_lastDisconnectTime = millis();
+        g_lastConnectedState = false;
+    }
+    else if (millis() > g_lastDisconnectTime + 3000)
+    {
+        g_gfx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, 0x0000);
+
+        Point2D center = { CANVAS_WIDTH / 2, CANVAS_HEIGHT - 32 };
+        drawTextCentered(&g_gfx, "Disconnected", &FontCondensed16px, /*textSize=*/1, center, 0xFFFF);
+
+        drawLogo();
         redrawFromCanvas();
-    });
+    }
+}
+
+void drawLogo()
+{
+    drawGrayscaleImageProgmem(&g_gfx, 0, 60, 80, 40, IMG_logoTbt80x40_4b, /*bits per pixel*/4);
 }
 
 void redrawFromCanvas()

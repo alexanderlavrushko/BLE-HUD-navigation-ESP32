@@ -30,6 +30,9 @@ OLED_SSD1351_nolib selectedDisplay;
 // ---------------------
 // Variables for display
 // ---------------------
+#define DISPLAY_MIRRORED 0 // 0 or 1
+#define DISPLAY_ROTATION 0 // 0, 90, 180 or 270
+
 IDisplay& g_display = selectedDisplay;
 const int CANVAS_WIDTH = g_display.GetWidth();
 const int CANVAS_HEIGHT = g_display.GetHeight();
@@ -441,6 +444,23 @@ void Draw4bitImageProgmem(int x, int y, int width, int height, const uint8_t* pB
 
 void SetPixelCanvas(int16_t x, int16_t y, uint16_t value)
 {
+#if DISPLAY_MIRRORED
+    x = CANVAS_WIDTH - x;
+#endif
+
+#if DISPLAY_ROTATION == 90
+    const int16_t xOriginal = x;
+    x = CANVAS_WIDTH - y;
+    y = xOriginal;
+#elif DISPLAY_ROTATION == 180
+    x = CANVAS_WIDTH - x;
+    y = CANVAS_HEIGHT - y;
+#elif DISPLAY_ROTATION == 270
+    const int16_t xOriginal = x;
+    x = y;
+    y = CANVAS_HEIGHT - xOriginal;
+#endif
+    
     if (x < 0 || y < 0 || x >= CANVAS_WIDTH || y >= CANVAS_HEIGHT)
     {
         return;

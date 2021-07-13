@@ -439,35 +439,35 @@ void Draw4bitImageProgmem(int x, int y, int width, int height, const uint8_t* pB
     }
 }
 
-void SetPixelCanvas(int x, int y, uint16_t value)
+void SetPixelCanvas(int16_t x, int16_t y, uint16_t value)
 {
-    int indexDestination = y * CANVAS_WIDTH + x;
-    if (indexDestination < CANVAS_WIDTH * CANVAS_HEIGHT)
-        g_canvas[indexDestination] = value;
+    if (x < 0 || y < 0 || x >= CANVAS_WIDTH || y >= CANVAS_HEIGHT)
+    {
+        return;
+    }
+    g_canvas[y * CANVAS_WIDTH + x] = value;
 }
 
-void SetPixelCanvasIfNot0(int x, int y, uint16_t value)
+void SetPixelCanvasIfNot0(int16_t x, int16_t y, uint16_t value)
 {
     if (value)
         SetPixelCanvas(x, y, value);
 }
 
-void DrawColumn8(uint8_t x, uint8_t y, uint8_t columnData, int scale, bool overwrite, uint16_t color)
+void DrawColumn8(int16_t x, int16_t y, uint8_t columnData, int scale, bool overwrite, uint16_t color)
 {
     uint8_t mask = 1;
     for (uint8_t row = 0; row < Font8x8::HEIGHT * scale; row += scale)
     {
         for (int fillIndex = 0; fillIndex < scale * scale; ++fillIndex)
         {
-            uint8_t yDestination = y + row + fillIndex / scale;
-            uint16_t drawIndex = yDestination * CANVAS_WIDTH + x + fillIndex % scale;
-            if (drawIndex >= CANVAS_WIDTH * CANVAS_HEIGHT)
-                return;
+            int16_t xDestination = x + fillIndex % scale;
+            int16_t yDestination = y + row + fillIndex / scale;
     
             if (columnData & mask)
-                g_canvas[drawIndex] = color;
+                SetPixelCanvas(xDestination, yDestination, color);
             else if (overwrite)
-                g_canvas[drawIndex] = 0x0000;
+                SetPixelCanvas(xDestination, yDestination, 0x0000);
         }        
 
         mask <<= 1;
@@ -493,7 +493,7 @@ void FillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
     {
         for (int16_t x = xStart; x < xEnd; ++x)
         {
-            g_canvas[y * CANVAS_WIDTH + x] = color; 
+            SetPixelCanvas(x, y, color);
         }
     }
 }

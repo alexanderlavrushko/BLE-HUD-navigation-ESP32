@@ -83,6 +83,7 @@ public:
     }
 };
 Button2Extended g_btnDeepSleep(BUTTON_DEEP_SLEEP);
+bool g_sleepRequested = false;
 
 // --------
 // Voltage measurement
@@ -175,7 +176,12 @@ void setup()
 
     // setup deep sleep button
     g_btnDeepSleep.setLongClickTime(500);
-    g_btnDeepSleep.setLongClickHandler([](Button2& b) {
+    g_btnDeepSleep.setReleasedHandler([](Button2& b) {
+        if (!g_sleepRequested)
+        {
+            return;    
+        }
+        
         g_display.EnterSleepMode();
 
         // without this the module won't wake up with button if powered from battery,
@@ -220,6 +226,7 @@ void loop()
     g_btn1.loop();
     if (g_btnDeepSleep.currentlyPressedDuration() >= g_btnDeepSleep.getLongClickTime())
     {
+        g_sleepRequested = true;
         DrawBottomMessage("SLEEP", COLOR_MAGENTA);
     }
     else if (g_showVoltage)

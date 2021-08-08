@@ -9,6 +9,7 @@
 #include "ImagesLanes.h"
 #include "Font8x8GlyphShifter.h"
 #include "DataConstants.h"
+#include "esp_adc_cal.h"
 
 // -----------------
 // Display selection
@@ -66,7 +67,7 @@ std::string g_naviData;
 #define TTGO_LEFT_BUTTON 0
 #define GPIO_NUM_TTGO_LEFT_BUTTON GPIO_NUM_0
 
-//#define TTGO_RIGHT_BUTTON 35
+#define TTGO_RIGHT_BUTTON 35
 //#define GPIO_NUM_TTGO_RIGHT_BUTTON GPIO_NUM_35
 
 #define BUTTON_DEEP_SLEEP TTGO_LEFT_BUTTON
@@ -82,6 +83,15 @@ public:
     }
 };
 Button2Extended g_btnDeepSleep(BUTTON_DEEP_SLEEP);
+
+// --------
+// Voltage measurement
+// --------
+#define VOLTAGE_ADC_ENABLE          14
+#define VOLTAGE_ADC_PIN             34
+static int vref = 1100;
+static bool g_showVoltage = false;
+Button2 g_btn1(TTGO_RIGHT_BUTTON);
 
 // ---------------------
 // Bluetooth event callbacks
@@ -168,9 +178,37 @@ void setup()
     g_btnDeepSleep.setLongClickHandler([](Button2& b) {
         g_display.EnterSleepMode();
 
+        // without this the module won't wake up with button if powered from battery,
+        // especially if entered deep sleep when powered from USB
+        pinMode(VOLTAGE_ADC_ENABLE, INPUT_PULLUP);
+        
         esp_sleep_enable_ext0_wakeup(GPIO_NUM_WAKEUP, 0);
         delay(200);
         esp_deep_sleep_start();
+    });
+
+    // setup voltage measurement
+    pinMode(VOLTAGE_ADC_ENABLE, OUTPUT);
+    esp_adc_cal_characteristics_t adc_chars = {};
+    esp_adc_cal_value_t val_type = esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_chars); //Check type of calibration value used to characterize ADC
+    if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF)
+    {
+        Serial.printf("eFuse Vref:%u mV", adc_chars.vref);
+        vref = adc_chars.vref;
+    }
+    else if (val_type == ESP_ADC_CAL_VAL_EFUSE_TP)
+    {
+        Serial.printf("Two Point --> coeff_a:%umV coeff_b:%umV\n", adc_chars.coeff_a, adc_chars.coeff_b);
+    }
+    else
+    {
+        Serial.println("Default Vref: 1100mV");
+    }
+    g_btn1.setPressedHandler([](Button2& b) {
+        g_showVoltage = true;
+    });
+    g_btn1.setReleasedHandler([](Button2& b) {
+        g_showVoltage = false;
     });
 
     Serial.println("setup() finished");
@@ -179,13 +217,30 @@ void setup()
 void loop()
 {
     g_btnDeepSleep.loop();
+    g_btn1.loop();
     if (g_btnDeepSleep.currentlyPressedDuration() >= g_btnDeepSleep.getLongClickTime())
     {
-        const int16_t textHeight = 16;
-        const int16_t yOffset = CANVAS_HEIGHT - textHeight;
-        FillRect(0, yOffset, CANVAS_WIDTH, textHeight, COLOR_BLACK);
-        DrawMessage("SLEEP", 0, yOffset, 2, true, COLOR_MAGENTA);
-        RedrawFromCanvas();
+        DrawBottomMessage("SLEEP", COLOR_MAGENTA);
+    }
+    else if (g_showVoltage)
+    {
+        static uint64_t voltageTimeStamp = 0;
+        if (millis() - voltageTimeStamp > 1000)
+        {
+            // ADC_EN is the ADC detection enable port
+            // If the USB port is used for power supply, it is turned on by default
+            // If it is powered by battery, it needs to be set to high level
+            digitalWrite(VOLTAGE_ADC_ENABLE, HIGH);
+            delay(10); // need to wait, otherwise wrong result on battery (0.2V instead 4.1V)
+            {
+                voltageTimeStamp = millis();
+                uint16_t v = analogRead(VOLTAGE_ADC_PIN);
+                float voltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1000.0);
+                String voltageStr = String(voltage) + " V";
+                DrawBottomMessage(voltageStr.c_str(), COLOR_WHITE);
+            }
+            digitalWrite(VOLTAGE_ADC_ENABLE, LOW);
+        }
     }
     else if (g_deviceConnected)
     {
@@ -248,13 +303,18 @@ void loop()
     }
     else if (millis() > 3000)
     {
-        const int16_t textHeight = 16;
-        const int16_t yOffset = CANVAS_HEIGHT - textHeight;
-        FillRect(0, yOffset, CANVAS_WIDTH, textHeight, COLOR_BLACK);
-        DrawMessage("Disconnected", 0, yOffset, 2, true, COLOR_WHITE);
-        RedrawFromCanvas();
+        DrawBottomMessage("Disconnected", COLOR_WHITE);
     }
     delay(10);
+}
+
+void DrawBottomMessage(const char* msg, uint16_t color)
+{
+    const int16_t textHeight = 16;
+    const int16_t yOffset = CANVAS_HEIGHT - textHeight;
+    FillRect(0, yOffset, CANVAS_WIDTH, textHeight, COLOR_BLACK);
+    DrawMessage(msg, 0, yOffset, 2, true, color);
+    RedrawFromCanvas();
 }
 
 void DrawMessage(const char* msg, int xStart, int yStart, int scale, bool overwrite, uint16_t color)

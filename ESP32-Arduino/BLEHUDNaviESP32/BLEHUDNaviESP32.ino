@@ -9,7 +9,7 @@
 #include "ImagesLanes.h"
 #include "Font8x8GlyphShifter.h"
 #include "DataConstants.h"
-#include "esp_adc_cal.h"
+#include "VoltageMeasurement.h"
 
 // -----------------
 // Display selection
@@ -90,7 +90,7 @@ bool g_sleepRequested = false;
 // --------
 #define VOLTAGE_ADC_ENABLE          14
 #define VOLTAGE_ADC_PIN             34
-static int vref = 1100;
+static VoltageMeasurement g_voltage(VOLTAGE_ADC_PIN, VOLTAGE_ADC_ENABLE);
 static bool g_showVoltage = false;
 Button2 g_btn1(TTGO_RIGHT_BUTTON);
 
@@ -186,7 +186,7 @@ void setup()
 
         // without this the module won't wake up with button if powered from battery,
         // especially if entered deep sleep when powered from USB
-        pinMode(VOLTAGE_ADC_ENABLE, INPUT_PULLUP);
+        g_voltage.end();
         
         esp_sleep_enable_ext0_wakeup(GPIO_NUM_WAKEUP, 0);
         delay(200);
@@ -194,22 +194,7 @@ void setup()
     });
 
     // setup voltage measurement
-    pinMode(VOLTAGE_ADC_ENABLE, OUTPUT);
-    esp_adc_cal_characteristics_t adc_chars = {};
-    esp_adc_cal_value_t val_type = esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_chars); //Check type of calibration value used to characterize ADC
-    if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF)
-    {
-        Serial.printf("eFuse Vref:%u mV", adc_chars.vref);
-        vref = adc_chars.vref;
-    }
-    else if (val_type == ESP_ADC_CAL_VAL_EFUSE_TP)
-    {
-        Serial.printf("Two Point --> coeff_a:%umV coeff_b:%umV\n", adc_chars.coeff_a, adc_chars.coeff_b);
-    }
-    else
-    {
-        Serial.println("Default Vref: 1100mV");
-    }
+    g_voltage.begin();
     g_btn1.setPressedHandler([](Button2& b) {
         g_showVoltage = true;
     });
@@ -234,19 +219,9 @@ void loop()
         static uint64_t voltageTimeStamp = 0;
         if (millis() - voltageTimeStamp > 1000)
         {
-            // ADC_EN is the ADC detection enable port
-            // If the USB port is used for power supply, it is turned on by default
-            // If it is powered by battery, it needs to be set to high level
-            digitalWrite(VOLTAGE_ADC_ENABLE, HIGH);
-            delay(10); // need to wait, otherwise wrong result on battery (0.2V instead 4.1V)
-            {
-                voltageTimeStamp = millis();
-                uint16_t v = analogRead(VOLTAGE_ADC_PIN);
-                float voltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1000.0);
-                String voltageStr = String(voltage) + " V";
-                DrawBottomMessage(voltageStr.c_str(), COLOR_WHITE);
-            }
-            digitalWrite(VOLTAGE_ADC_ENABLE, LOW);
+            voltageTimeStamp = millis();
+            String voltageStr = String(g_voltage.measureVolts()) + " V";
+            DrawBottomMessage(voltageStr.c_str(), COLOR_WHITE);
         }
     }
     else if (g_deviceConnected)

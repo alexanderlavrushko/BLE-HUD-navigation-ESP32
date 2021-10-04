@@ -79,7 +79,7 @@ public:
     Button2Extended(byte pin) : Button2(pin) {}
     unsigned long currentlyPressedDuration()
     {
-        return (state == pressed ? millis() - down_ms: 0);
+        return (state == _pressedState ? millis() - down_ms: 0);
     }
 };
 Button2Extended g_btnDeepSleep(BUTTON_DEEP_SLEEP);

@@ -48,12 +48,14 @@ To enable TTGO T-Display:
 1. Uncomment display in code
 ```
 // comment out these lines 
-#include "OLED_SSD1351_Adafruit.h"
-OLED_SSD1351_Adafruit selectedDisplay;
+#include "OLED_SSD1351_nolib.h"
+OLED_SSD1351_nolib selectedDisplay;
+constexpr bool ENABLE_VOLTAGE_MEASUREMENT = false;
 
 // uncomment these lines
 //#include "TFT_TTGO.h"
 //TFT_TTGO selectedDisplay;
+//constexpr bool ENABLE_VOLTAGE_MEASUREMENT = true;
 ```
 
 ### Display OLED 128x128

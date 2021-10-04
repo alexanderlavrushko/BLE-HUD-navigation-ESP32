@@ -21,12 +21,14 @@
 // Pins: DIN=23, CLK=18, CS=5, DC=17, RST=16, uses SPIClass(VSPI)
 #include "OLED_SSD1351_nolib.h"
 OLED_SSD1351_nolib selectedDisplay;
+constexpr bool ENABLE_VOLTAGE_MEASUREMENT = false;
 
 // TTGO T-Display TFT 135x240
 // Requires library TFT_eSPI from here: https://github.com/Xinyuan-LilyGO/TTGO-T-Display
 // (copy TFT_eSPI to Arduino/libraries)
 //#include "TFT_TTGO.h"
 //TFT_TTGO selectedDisplay;
+//constexpr bool ENABLE_VOLTAGE_MEASUREMENT = true;
 
 // ---------------------
 // Variables for display
@@ -194,13 +196,16 @@ void setup()
     });
 
     // setup voltage measurement
-    g_voltage.begin();
-    g_btn1.setPressedHandler([](Button2& b) {
-        g_showVoltage = true;
-    });
-    g_btn1.setReleasedHandler([](Button2& b) {
-        g_showVoltage = false;
-    });
+    if (ENABLE_VOLTAGE_MEASUREMENT)
+    {
+        g_voltage.begin();
+        g_btn1.setPressedHandler([](Button2& b) {
+            g_showVoltage = true;
+        });
+        g_btn1.setReleasedHandler([](Button2& b) {
+            g_showVoltage = false;
+        });
+    }
 
     Serial.println("setup() finished");
 }

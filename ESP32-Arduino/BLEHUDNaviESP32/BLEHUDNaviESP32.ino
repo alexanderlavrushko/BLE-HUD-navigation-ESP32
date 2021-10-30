@@ -125,7 +125,16 @@ class MyCharWriteCallbacks: public BLECharacteristicCallbacks
         {
             g_naviData = value;
             g_isNaviDataUpdated = true;
-            Serial.print("New value. ");
+            Serial.print("New value, length = ");
+            Serial.print(value.length());
+            Serial.print(": ");
+            for (int i = 0; i < value.length(); ++i)
+            {
+                char tmp[4] = "";
+                sprintf(tmp, "%02X ", value[i]);
+                Serial.print(tmp);
+            }
+            Serial.println();
         }
     }
 };

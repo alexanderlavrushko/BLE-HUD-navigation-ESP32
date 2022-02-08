@@ -1,7 +1,4 @@
-#include <BLEDevice.h>
-#include <BLEUtils.h>
-#include <BLEServer.h>
-#include <BLE2902.h>
+#include "BLEPeripheralHUD.h"
 #include <Button2.h> // available in Arduino libraries, or https://github.com/LennartHennigs/Button2
 #include "IDisplay.h"
 #include "ImagesOther.h"
@@ -56,9 +53,7 @@ uint16_t* g_canvas = NULL;
 // -----------------
 // Variables for BLE
 // -----------------
-BLEServer* g_pServer = NULL;
-BLECharacteristic* g_pCharIndicate = NULL;
-bool g_deviceConnected = false;
+BLEPeripheralHUD g_blePeripheral;
 uint32_t g_lastActivityTime = 0;
 bool g_isNaviDataUpdated = false;
 std::string g_naviData;
@@ -96,53 +91,10 @@ static VoltageMeasurement g_voltage(VOLTAGE_ADC_PIN, VOLTAGE_ADC_ENABLE);
 static bool g_showVoltage = false;
 Button2 g_btn1(TTGO_RIGHT_BUTTON);
 
-// ---------------------
-// Bluetooth event callbacks
-// ---------------------
-class MyServerCallbacks: public BLEServerCallbacks
-{
-    void onConnect(BLEServer* pServer) override
-    {
-        g_deviceConnected = true;
-        g_lastActivityTime = millis();
-    }
-
-    void onDisconnect(BLEServer* pServer) override
-    {
-        g_deviceConnected = false;
-        BLEDevice::startAdvertising();
-    }
-};
-
-class MyCharWriteCallbacks: public BLECharacteristicCallbacks
-{
-    void onWrite(BLECharacteristic *pCharacteristic)
-    {
-        g_lastActivityTime = millis();
-        std::string value = pCharacteristic->getValue();
-
-        if (value.length() > 0)
-        {
-            g_naviData = value;
-            g_isNaviDataUpdated = true;
-            Serial.print("New value, length = ");
-            Serial.print(value.length());
-            Serial.print(": ");
-            for (int i = 0; i < value.length(); ++i)
-            {
-                char tmp[4] = "";
-                sprintf(tmp, "%02X ", value[i]);
-                Serial.print(tmp);
-            }
-            Serial.println();
-        }
-    }
-};
-
 void setup()
 {
     Serial.begin(115200);
-    Serial.println("BLENaviPeripheral2 setup() started");
+    Serial.println("BLEHUDNaviESP32 setup() started");
 
     g_display.Init();
     g_canvas = new uint16_t[CANVAS_WIDTH * CANVAS_HEIGHT];
@@ -157,33 +109,19 @@ void setup()
     Serial.println("BLE init started");
 
     BLEDevice::init("ESP32 HUD");
-    g_pServer = BLEDevice::createServer();
-    g_pServer->setCallbacks(new MyServerCallbacks());
-    BLEService *pService = g_pServer->createService(SERVICE_UUID);
+    g_blePeripheral.begin();
 
-    // characteristic for indicate
-    {
-        uint32_t charProperties = BLECharacteristic::PROPERTY_INDICATE;
-        g_pCharIndicate = pService->createCharacteristic(CHAR_INDICATE_UUID, charProperties);
-        g_pCharIndicate->addDescriptor(new BLE2902());
-        g_pCharIndicate->setValue("");
-    }
-
-    // characteristic for write
-    {
-        uint32_t charProperties = BLECharacteristic::PROPERTY_WRITE;
-        BLECharacteristic *pCharWrite = pService->createCharacteristic(CHAR_WRITE_UUID, charProperties);
-        pCharWrite->setCallbacks(new MyCharWriteCallbacks());
-    }
-
-    pService->start();
-    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
     pAdvertising->setScanResponse(true);
-    pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
-    pAdvertising->setMinPreferred(0x12);
+    // this fixes iPhone connection issue (don't know how it works)
+    {
+        pAdvertising->setMinPreferred(0x06);
+        pAdvertising->setMinPreferred(0x12);
+    }
     BLEDevice::startAdvertising();
     Serial.println("BLE init done");
+    ////////
 
     // setup deep sleep button
     g_btnDeepSleep.setLongClickTime(500);
@@ -238,7 +176,7 @@ void loop()
             DrawBottomMessage(voltageStr.c_str(), COLOR_WHITE);
         }
     }
-    else if (g_deviceConnected)
+    else if (g_blePeripheral.isConnected())
     {
         if (g_isNaviDataUpdated)
         {
@@ -293,7 +231,7 @@ void loop()
             if (time - g_lastActivityTime > 4000)
             {
                 g_lastActivityTime = time;
-                g_pCharIndicate->indicate();
+//                g_pCharIndicate->indicate();
             }
         }
     }

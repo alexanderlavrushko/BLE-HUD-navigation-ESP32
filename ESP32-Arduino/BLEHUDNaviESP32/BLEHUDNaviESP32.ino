@@ -5,7 +5,6 @@
 #include "ImagesDirections.h"
 #include "ImagesLanes.h"
 #include "Font8x8GlyphShifter.h"
-#include "DataConstants.h"
 #include "VoltageMeasurement.h"
 
 // -----------------
@@ -42,10 +41,6 @@ uint16_t* g_canvas = NULL;
 // ---------------------
 // Constants
 // ---------------------
-#define SERVICE_UUID        "DD3F0AD1-6239-4E1F-81F1-91F6C9F01D86"
-#define CHAR_INDICATE_UUID  "DD3F0AD2-6239-4E1F-81F1-91F6C9F01D86"
-#define CHAR_WRITE_UUID     "DD3F0AD3-6239-4E1F-81F1-91F6C9F01D86"
-
 #define COLOR_BLACK    0x0000
 #define COLOR_WHITE    0xFFFF
 #define COLOR_MAGENTA  0xF81F
@@ -54,6 +49,7 @@ uint16_t* g_canvas = NULL;
 // Variables for BLE
 // -----------------
 BLEPeripheralHUD g_blePeripheral;
+bool g_deviceConnected = false;
 uint32_t g_lastActivityTime = 0;
 bool g_isNaviDataUpdated = false;
 std::string g_naviData;
@@ -109,10 +105,24 @@ void setup()
     Serial.println("BLE init started");
 
     BLEDevice::init("ESP32 HUD");
+
+    g_blePeripheral.setConnectionChangedCallback([](bool isConnected)
+    {
+        g_deviceConnected = isConnected;
+        if (!isConnected)
+        {
+            BLEDevice::startAdvertising();
+        }
+    });
+    g_blePeripheral.setHUDDataChangedCallback([](const HUDData& hudData)
+    {
+        memset(g_canvas, 0, CANVAS_SIZE_BYTES);
+        DrawHUDData(hudData);
+    });
     g_blePeripheral.begin();
 
     BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->addServiceUUID(g_blePeripheral.getServiceUUID());
     pAdvertising->setScanResponse(true);
     // this fixes iPhone connection issue (don't know how it works)
     {
@@ -161,6 +171,8 @@ void loop()
 {
     g_btnDeepSleep.loop();
     g_btn1.loop();
+    g_blePeripheral.loop();
+
     if (g_btnDeepSleep.currentlyPressedDuration() >= g_btnDeepSleep.getLongClickTime())
     {
         g_sleepRequested = true;
@@ -176,64 +188,55 @@ void loop()
             DrawBottomMessage(voltageStr.c_str(), COLOR_WHITE);
         }
     }
-    else if (g_blePeripheral.isConnected())
+    else if (g_deviceConnected)
     {
-        if (g_isNaviDataUpdated)
-        {
-            g_isNaviDataUpdated = false;
-    
-            std::string currentData = g_naviData;
-            if (currentData.size() > 0)
-            {
-                memset(g_canvas, 0, CANVAS_SIZE_BYTES);
-                if (currentData[0] == 1)
-                {
-                    Serial.print("Reading basic data: length = ");
-                    Serial.println(currentData.length());
-                    
-                    const int speedOffset = 1;
-                    const int instructionOffset = 2;
-                    const int textOffset = 3;
-
-                    if (currentData.length() > textOffset)
-                    {
-                        int scale = 4;
-                        const char* text = currentData.c_str() + textOffset;
-                        const int textLen = strlen(text);
-                        if (textLen > 8)
-                        {
-                            scale = 2;
-                        }
-                        else if (textLen > 6)
-                        {
-                            scale = 3;
-                        }
-                        DrawMessage(currentData.c_str() + textOffset, 0, 64, scale, true, Color4To16bit(0x0F)/*0xFFFF*/);
-                    }
-                    
-                    if (currentData.length() > instructionOffset)
-                        DrawDirection(currentData.c_str()[instructionOffset]);
-
-                    if (currentData.length() > speedOffset)
-                        DrawSpeed(currentData.c_str()[speedOffset]);
-
-                    RedrawFromCanvas();
-                }
-                else
-                {
-                    Serial.println("invalid first byte");
-                }
-            }
-        }
-        else
-        {
-            uint32_t time = millis();
-            if (time - g_lastActivityTime > 4000)
-            {
-                g_lastActivityTime = time;
-//                g_pCharIndicate->indicate();
-            }
-        }
+//        if (g_isNaviDataUpdated)
+//        {
+//            g_isNaviDataUpdated = false;
+//    
+//            std::string currentData = g_naviData;
+//            if (currentData.size() > 0)
+//            {
+//                memset(g_canvas, 0, CANVAS_SIZE_BYTES);
+//                if (currentData[0] == 1)
+//                {
+//                    Serial.print("Reading basic data: length = ");
+//                    Serial.println(currentData.length());
+//                    
+//                    const int speedOffset = 1;
+//                    const int instructionOffset = 2;
+//                    const int textOffset = 3;
+//
+//                    if (currentData.length() > textOffset)
+//                    {
+//                        int scale = 4;
+//                        const char* text = currentData.c_str() + textOffset;
+//                        const int textLen = strlen(text);
+//                        if (textLen > 8)
+//                        {
+//                            scale = 2;
+//                        }
+//                        else if (textLen > 6)
+//                        {
+//                            scale = 3;
+//                        }
+//                        DrawMessage(currentData.c_str() + textOffset, 0, 64, scale, true, Color4To16bit(0x0F)/*0xFFFF*/);
+//                    }
+//                    
+//                    if (currentData.length() > instructionOffset)
+//                        DrawDirection(currentData.c_str()[instructionOffset]);
+//
+//                    if (currentData.length() > speedOffset)
+//                        DrawSpeed(currentData.c_str()[speedOffset]);
+//
+//                    RedrawFromCanvas();
+//                }
+//                else
+//                {
+//                    Serial.println("invalid first byte");
+//                }
+//            }
+//        }
     }
     else if (millis() > 3000)
     {
@@ -248,6 +251,27 @@ void DrawBottomMessage(const char* msg, uint16_t color)
     const int16_t yOffset = CANVAS_HEIGHT - textHeight;
     FillRect(0, yOffset, CANVAS_WIDTH, textHeight, COLOR_BLACK);
     DrawMessage(msg, 0, yOffset, 2, true, color);
+    RedrawFromCanvas();
+}
+
+void DrawHUDData(const HUDData& hudData)
+{
+    const int textSize = hudData.text.size();
+    if (textSize > 0)
+    {
+        int scale = 4;
+        if (textSize > 8)
+        {
+            scale = 2;
+        }
+        else if (textSize > 6)
+        {
+            scale = 3;
+        }
+        DrawMessage(hudData.text.c_str(), 0, 64, scale, true, Color4To16bit(0x0F)/*0xFFFF*/);
+    }
+    DrawDirection(hudData.direction);
+    DrawSpeed(hudData.speedLimit);
     RedrawFromCanvas();
 }
 

@@ -2,7 +2,7 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
-#include <Button2.h> // available in Arduino libraries, or https://github.com/LennartHennigs/Button2
+#include <Button2.h> // version 2.0.3, available in Arduino libraries, or https://github.com/LennartHennigs/Button2
 #include "IDisplay.h"
 #include "ImagesOther.h"
 #include "ImagesDirections.h"
@@ -75,16 +75,7 @@ std::string g_naviData;
 #define BUTTON_DEEP_SLEEP TTGO_LEFT_BUTTON
 #define GPIO_NUM_WAKEUP GPIO_NUM_TTGO_LEFT_BUTTON
 
-class Button2Extended : public Button2
-{
-public:
-    Button2Extended(byte pin) : Button2(pin) {}
-    unsigned long currentlyPressedDuration()
-    {
-        return (state == _pressedState ? millis() - down_ms: 0);
-    }
-};
-Button2Extended g_btnDeepSleep(BUTTON_DEEP_SLEEP);
+Button2 g_btnDeepSleep(BUTTON_DEEP_SLEEP);
 bool g_sleepRequested = false;
 
 // --------
@@ -187,6 +178,9 @@ void setup()
 
     // setup deep sleep button
     g_btnDeepSleep.setLongClickTime(500);
+    g_btnDeepSleep.setLongClickDetectedHandler([](Button2& b) {
+        g_sleepRequested = true;
+    });
     g_btnDeepSleep.setReleasedHandler([](Button2& b) {
         if (!g_sleepRequested)
         {
@@ -223,9 +217,8 @@ void loop()
 {
     g_btnDeepSleep.loop();
     g_btn1.loop();
-    if (g_btnDeepSleep.currentlyPressedDuration() >= g_btnDeepSleep.getLongClickTime())
+    if (g_sleepRequested)
     {
-        g_sleepRequested = true;
         DrawBottomMessage("SLEEP", COLOR_MAGENTA);
     }
     else if (g_showVoltage)
